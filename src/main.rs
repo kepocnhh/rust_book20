@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 
 fn on_stream(index: usize, mut stream: TcpStream) {
     // Method Request-URI HTTP-Version CRLF
@@ -18,8 +19,18 @@ fn on_stream(index: usize, mut stream: TcpStream) {
     let version = "1.1";
     let code = 200;
     let message = "OK";
-    let crlf = "\r\n\r\n";
-    let response = format!("HTTP/{version} {code} {message}{crlf}");
+    let crlf = "\r\n";
+    let status = format!("HTTP/{version} {code} {message}");
+    let body = "<html><body>Rust book: chapter 20</body></html>";
+    let headers = HashMap::from([
+        (String::from("Content-Length"), format!("{}", body.len()))
+    ]);
+    let headers = headers.iter()
+        .map(|(key, value)| format!("{key}: {value}"))
+        .collect::<Vec<String>>()
+        .join(crlf);
+    let response = format!("{status}{crlf}{headers}{crlf}{crlf}{body}");
+    println!("Response: {response}");
     stream.write_all(response.as_bytes()).unwrap();
 }
 
