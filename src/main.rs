@@ -1,13 +1,26 @@
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 
-fn on_stream(index: usize, stream: TcpStream) {
-    let request: Vec<_> = BufReader::new(stream)
+fn on_stream(index: usize, mut stream: TcpStream) {
+    // Method Request-URI HTTP-Version CRLF
+    // headers CRLF
+    // message-body
+    let request: Vec<_> = BufReader::new(&stream)
         .lines()
         .map(|it| it.unwrap())
         .take_while(|it| !it.is_empty())
         .collect();
     println!("Request({index}): {request:#?}");
+
+    // HTTP-Version Status-Code Reason-Phrase CRLF
+    // headers CRLF
+    // message-body
+    let version = "1.1";
+    let code = 200;
+    let message = "OK";
+    let crlf = "\r\n\r\n";
+    let response = format!("HTTP/{version} {code} {message}{crlf}");
+    stream.write_all(response.as_bytes()).unwrap();
 }
 
 fn main() {
