@@ -1,3 +1,4 @@
+use std::sync::{Arc, mpsc, Mutex};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -38,11 +39,47 @@ fn on_stream(mut stream: TcpStream) {
     }
 }
 
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+struct ThreadPool {
+    handles: Vec<std::thread::JoinHandle<()>>,
+    sender: mpsc::Sender<Job>,
+}
+
+impl ThreadPool {
+    fn new(number: usize) -> ThreadPool {
+        assert!(number > 0);
+
+        let (sender, receiver) = mpsc::channel();
+
+        let receiver = Arc::new(Mutex::new(receiver));
+
+        let mut handles = Vec::with_capacity(number);
+        for index in 0..number {
+            let receiver: Arc<Mutex<mpsc::Receiver<Job>>> = Arc::clone(&receiver);
+            let handle = std::thread::spawn(move || loop {
+                let guard = receiver.lock().unwrap();
+                let job = guard.recv().unwrap();
+                println!("Worker #{index} got a job; executing...");
+                job();
+            });
+            handles.push(handle);
+        }
+        return ThreadPool { handles, sender };
+    }
+
+    fn execute<F>(&self, block: F) where F: FnOnce() + Send + 'static {
+        let job = Box::new(block);
+        self.sender.send(job).unwrap();
+    }
+}
+
 fn main() {
     let ipv4 = "127.0.0.1";
     let port = 8080;
     let listener = TcpListener::bind(format!("{ipv4}:{port}")).unwrap();
+    let pool = ThreadPool::new(4);
     for it in listener.incoming() {
-        on_stream(it.unwrap());
+        pool.execute(|| on_stream(it.unwrap()));
     }
 }
