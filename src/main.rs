@@ -2,46 +2,47 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 
-fn on_stream(index: usize, mut stream: TcpStream) {
-    // Method Request-URI HTTP-Version CRLF
-    // headers CRLF
-    // message-body
-    let request: Vec<_> = BufReader::new(&stream)
-        .lines()
-        .map(|it| it.unwrap())
-        .take_while(|it| !it.is_empty())
-        .collect();
-    println!("Request({index}): {request:#?}");
+const CRLF: &str = "\r\n";
+const VERSION: &str = "1.1";
 
-    // HTTP-Version Status-Code Reason-Phrase CRLF
-    // headers CRLF
-    // message-body
-    let version = "1.1";
-    let code = 200;
-    let message = "OK";
-    let crlf = "\r\n";
-    let status = format!("HTTP/{version} {code} {message}");
-    let body = "<html><body>Rust book: chapter 20</body></html>";
+fn get_response(body: &str, code: u16, message: &str) -> String {
+    let status = format!("HTTP/{VERSION} {code} {message}");
     let headers = HashMap::from([
-        (String::from("Content-Length"), format!("{}", body.len()))
-    ]);
-    let headers = headers.iter()
+        ("Content-Length", body.len().to_string())
+    ]).iter()
         .map(|(key, value)| format!("{key}: {value}"))
-        .collect::<Vec<String>>()
-        .join(crlf);
-    let response = format!("{status}{crlf}{headers}{crlf}{crlf}{body}");
-    println!("Response: {response}");
-    stream.write_all(response.as_bytes()).unwrap();
+        .collect::<Vec<_>>()
+        .join(CRLF);
+    return format!("{status}{CRLF}{headers}{CRLF}{CRLF}{body}");
+}
+
+fn on_stream(mut stream: TcpStream) {
+    let reader = BufReader::new(&stream);
+    let line = reader.lines().next().unwrap().unwrap();
+    if line == format!("GET / HTTP/{VERSION}") {
+        let body = "<html><body>Rust book: chapter 20</body></html>";
+        let response = get_response(body, 200, "OK");
+        println!("Response: {response}");
+        stream.write_all(response.as_bytes()).unwrap();
+    } else if line == format!("GET /quit HTTP/{VERSION}") {
+        let body = "<html><body>bye</body></html>";
+        let response = get_response(body, 200, "OK");
+        println!("Response: {response}");
+        stream.write_all(response.as_bytes()).unwrap();
+        std::process::exit(0);
+    } else {
+        let body = "<html><body>Sorry, I don't know what you're asking for.</body></html>";
+        let response = get_response(body, 404, "NOT FOUND");
+        println!("Response: {response}");
+        stream.write_all(response.as_bytes()).unwrap();
+    }
 }
 
 fn main() {
     let ipv4 = "127.0.0.1";
     let port = 8080;
     let listener = TcpListener::bind(format!("{ipv4}:{port}")).unwrap();
-    // let address = SocketAddr::from(([127, 0, 0, 1], port));
-    // let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-    // let listener = TcpListener::bind(address).unwrap();
-    for (index, it) in listener.incoming().enumerate() {
-        on_stream(index, it.unwrap());
+    for it in listener.incoming() {
+        on_stream(it.unwrap());
     }
 }
