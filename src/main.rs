@@ -32,30 +32,59 @@ fn on_stream(mut stream: TcpStream) {
         return;
     }
     let line = line.unwrap();
-
     println!("Request: {line}");
-    if line == format!("GET / HTTP/{VERSION}") {
-        let body = "<html><body>Rust book: chapter 20</body></html>";
-        let response = get_response(body, 200, "OK");
-        stream.write_all(response.as_bytes()).unwrap();
-        println!("Response: {response}");
-    } else if line == format!("GET /quit HTTP/{VERSION}") {
-        let body = "<html><body>bye</body></html>";
-        let response = get_response(body, 200, "OK");
-        stream.write_all(response.as_bytes()).unwrap();
-        println!("Response: {response}");
-        std::process::exit(0);
-    } else if line == format!("GET /sleep HTTP/{VERSION}") {
-        std::thread::sleep(Duration::from_secs(5));
-        let body = "<html><body>ok</body></html>";
-        let response = get_response(body, 200, "OK");
-        stream.write_all(response.as_bytes()).unwrap();
-        println!("Response: {response}");
-    } else {
-        let body = "<html><body>Sorry, I don't know what you're asking for.</body></html>";
-        let response = get_response(body, 404, "NOT FOUND");
-        stream.write_all(response.as_bytes()).unwrap();
-        println!("Response: {response}");
+    let line = line.split(' ').collect::<Vec<_>>();
+    if line.len() != 3 {
+        return;
+    }
+    if let Some(it) = line.get(0) {
+        if it != &"GET" {
+            println!("Wrong method!");
+            return;
+        }
+    }
+    if let Some(it) = line.get(2) {
+        if it != &format!("HTTP/{VERSION}") {
+            println!("Wrong protocol!");
+            return;
+        }
+    }
+    let query = line.get(1).unwrap();
+    if query.is_empty() {
+        println!("Wrong query!");
+        return;
+    }
+    match *query {
+        "" => {
+            println!("Wrong query!");
+            return;
+        }
+        "/" => {
+            let body = "<html><body>Rust book: chapter 20</body></html>";
+            let response = get_response(body, 200, "OK");
+            stream.write_all(response.as_bytes()).unwrap();
+            println!("Response: {response}");
+        }
+        "/quit" => {
+            let body = "<html><body>bye</body></html>";
+            let response = get_response(body, 200, "OK");
+            stream.write_all(response.as_bytes()).unwrap();
+            println!("Response: {response}");
+            std::process::exit(0);
+        }
+        "/sleep" => {
+            std::thread::sleep(Duration::from_secs(5));
+            let body = "<html><body>ok</body></html>";
+            let response = get_response(body, 200, "OK");
+            stream.write_all(response.as_bytes()).unwrap();
+            println!("Response: {response}");
+        }
+        _ => {
+            let body = "<html><body>Sorry, I don't know what you're asking for.</body></html>";
+            let response = get_response(body, 404, "NOT FOUND");
+            stream.write_all(response.as_bytes()).unwrap();
+            println!("Response: {response}");
+        }
     }
 }
 
@@ -83,8 +112,9 @@ impl Worker {
             // any temporary values used in the expression on the right hand side
             // of the equals sign are immediately dropped when the let statement ends
             // let job = receiver.lock().unwrap().recv().unwrap();
-            // match job {
-            match receiver.lock().unwrap().recv() {
+            let job = receiver.lock().unwrap().recv();
+            match job {
+            // match receiver.lock().unwrap().recv() {
                 Ok(job) => {
                     println!("Worker #{id} got a job; executing...");
                     job();
@@ -139,7 +169,7 @@ fn main() {
     let port = 8080;
     let listener = TcpListener::bind(format!("{ipv4}:{port}")).unwrap();
     let pool = ThreadPool::new(4);
-    for it in listener.incoming().take(2) {
+    for it in listener.incoming() {
         pool.execute(|| on_stream(it.unwrap()));
     }
 }
