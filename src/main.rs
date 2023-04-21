@@ -1,7 +1,8 @@
-use std::sync::{Arc, mpsc, Mutex};
+use std::sync::{Arc, LockResult, mpsc, Mutex};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::time::Duration;
 
 const CRLF: &str = "\r\n";
 const VERSION: &str = "1.1";
@@ -20,22 +21,29 @@ fn get_response(body: &str, code: u16, message: &str) -> String {
 fn on_stream(mut stream: TcpStream) {
     let reader = BufReader::new(&stream);
     let line = reader.lines().next().unwrap().unwrap();
+    println!("Request: {line}");
     if line == format!("GET / HTTP/{VERSION}") {
         let body = "<html><body>Rust book: chapter 20</body></html>";
         let response = get_response(body, 200, "OK");
-        println!("Response: {response}");
         stream.write_all(response.as_bytes()).unwrap();
+        println!("Response: {response}");
     } else if line == format!("GET /quit HTTP/{VERSION}") {
         let body = "<html><body>bye</body></html>";
         let response = get_response(body, 200, "OK");
-        println!("Response: {response}");
         stream.write_all(response.as_bytes()).unwrap();
+        println!("Response: {response}");
         std::process::exit(0);
+    } else if line == format!("GET /sleep HTTP/{VERSION}") {
+        std::thread::sleep(Duration::from_secs(5));
+        let body = "<html><body>ok</body></html>";
+        let response = get_response(body, 200, "OK");
+        stream.write_all(response.as_bytes()).unwrap();
+        println!("Response: {response}");
     } else {
         let body = "<html><body>Sorry, I don't know what you're asking for.</body></html>";
         let response = get_response(body, 404, "NOT FOUND");
-        println!("Response: {response}");
         stream.write_all(response.as_bytes()).unwrap();
+        println!("Response: {response}");
     }
 }
 
@@ -58,8 +66,11 @@ impl ThreadPool {
         for index in 0..number {
             let receiver: Arc<Mutex<mpsc::Receiver<Job>>> = Arc::clone(&receiver);
             let handle = std::thread::spawn(move || loop {
-                let guard = receiver.lock().unwrap();
-                let job = guard.recv().unwrap();
+                // let guard = receiver.lock().unwrap();
+                // let job = guard.recv().unwrap();
+                // any temporary values used in the expression on the right hand side
+                // of the equals sign are immediately dropped when the let statement ends
+                let job = receiver.lock().unwrap().recv().unwrap();
                 println!("Worker #{index} got a job; executing...");
                 job();
             });
