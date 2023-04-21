@@ -2,7 +2,8 @@ use std::sync::{Arc, LockResult, mpsc, Mutex};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
+use std::ops::{Add, Rem};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CRLF: &str = "\r\n";
 const VERSION: &str = "1.1";
@@ -20,7 +21,18 @@ fn get_response(body: &str, code: u16, message: &str) -> String {
 
 fn on_stream(mut stream: TcpStream) {
     let reader = BufReader::new(&stream);
-    let line = reader.lines().next().unwrap().unwrap();
+    let line = reader.lines().next();
+    if line.is_none() {
+        println!("Read line none!");
+        return;
+    }
+    let line = line.unwrap();
+    if line.is_err() {
+        println!("Read line error!");
+        return;
+    }
+    let line = line.unwrap();
+
     println!("Request: {line}");
     if line == format!("GET / HTTP/{VERSION}") {
         let body = "<html><body>Rust book: chapter 20</body></html>";
@@ -50,8 +62,41 @@ fn on_stream(mut stream: TcpStream) {
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
 struct ThreadPool {
-    handles: Vec<std::thread::JoinHandle<()>>,
-    sender: mpsc::Sender<Job>,
+    workers: Vec<Worker>,
+    sender: Option<mpsc::Sender<Job>>,
+}
+
+struct Worker {
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+        // let id = SystemTime::now()
+        //     .duration_since(UNIX_EPOCH)
+        //     .unwrap()
+        //     .as_nanos()
+        //     .rem(64);
+        let handle = std::thread::spawn(move || loop {
+            // let guard = receiver.lock().unwrap();
+            // let job = guard.recv().unwrap();
+            // any temporary values used in the expression on the right hand side
+            // of the equals sign are immediately dropped when the let statement ends
+            // let job = receiver.lock().unwrap().recv().unwrap();
+            // match job {
+            match receiver.lock().unwrap().recv() {
+                Ok(job) => {
+                    println!("Worker #{id} got a job; executing...");
+                    job();
+                }
+                Err(_) => {
+                    println!("Worker #{id} disconnected; shutting down.");
+                    break;
+                }
+            }
+        });
+        return Worker { handle: Some(handle) }
+    }
 }
 
 impl ThreadPool {
@@ -62,26 +107,30 @@ impl ThreadPool {
 
         let receiver = Arc::new(Mutex::new(receiver));
 
-        let mut handles = Vec::with_capacity(number);
+        let mut workers = Vec::with_capacity(number);
         for index in 0..number {
             let receiver: Arc<Mutex<mpsc::Receiver<Job>>> = Arc::clone(&receiver);
-            let handle = std::thread::spawn(move || loop {
-                // let guard = receiver.lock().unwrap();
-                // let job = guard.recv().unwrap();
-                // any temporary values used in the expression on the right hand side
-                // of the equals sign are immediately dropped when the let statement ends
-                let job = receiver.lock().unwrap().recv().unwrap();
-                println!("Worker #{index} got a job; executing...");
-                job();
-            });
-            handles.push(handle);
+            let worker = Worker::new(index, receiver);
+            workers.push(worker);
         }
-        return ThreadPool { handles, sender };
+        return ThreadPool { workers, sender: Some(sender) };
     }
 
     fn execute<F>(&self, block: F) where F: FnOnce() + Send + 'static {
         let job = Box::new(block);
-        self.sender.send(job).unwrap();
+        self.sender.as_ref().unwrap().send(job).unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+        for (index, worker) in self.workers.iter_mut().enumerate() {
+            println!("Shutting down worker #{index}");
+            if let Some(handle) = worker.handle.take() {
+                handle.join().unwrap();
+            }
+        }
     }
 }
 
@@ -90,7 +139,7 @@ fn main() {
     let port = 8080;
     let listener = TcpListener::bind(format!("{ipv4}:{port}")).unwrap();
     let pool = ThreadPool::new(4);
-    for it in listener.incoming() {
+    for it in listener.incoming().take(2) {
         pool.execute(|| on_stream(it.unwrap()));
     }
 }
