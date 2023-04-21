@@ -1,0 +1,6 @@
+[package]
+name = "rust_book20"
+version = "0.1.0"
+publish = false
+edition = "2021"
+rust-version = "1.66.0"
